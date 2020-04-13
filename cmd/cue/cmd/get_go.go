@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	stdruntime "runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -279,12 +280,20 @@ func (e *extractor) usedPkg(pkg string) {
 }
 
 func initInterfaces() error {
+	_, file, _, _ := stdruntime.Caller(0)
 	cfg := &packages.Config{
+		Dir:  filepath.Join(filepath.Dir(file), "interfaces"),
 		Mode: packages.LoadAllSyntax,
 	}
 	p, err := packages.Load(cfg, "cuelang.org/go/cmd/cue/cmd/interfaces")
 	if err != nil {
 		return err
+	}
+
+	for _, pp := range p {
+		if len(pp.Errors) != 0 {
+			return pp.Errors[0]
+		}
 	}
 
 	for e, tt := range p[0].TypesInfo.Types {
