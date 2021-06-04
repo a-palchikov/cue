@@ -1,0 +1,40 @@
+ARG GOLANG_VERSION=1.16
+FROM --platform=$BUILDPLATFORM golang:${GOLANG_VERSION}-alpine AS gobase
+
+# xx is a helper for cross-compilation
+FROM --platform=$BUILDPLATFORM tonistiigi/xx@sha256:810dc54d5144f133a218e88e319184bf8b9ce01d37d46ddb37573e90decd9eef AS xx
+
+FROM gobase AS go-linux
+FROM gobase AS go-darwin
+
+FROM go-${TARGETOS} AS gobuild-base
+RUN set -eux && \
+	apk add --no-cache file bash clang lld pkgconfig git make
+COPY --from=xx / /
+
+# target: cue-builder
+FROM gobuild-base AS cue-builder
+ARG CUE_VERSION
+ARG TARGETPLATFORM
+ENV \
+	OUTDIR='/out' \
+	GO111MODULE='on'
+WORKDIR /go/src/cuelang.org/go
+RUN --mount=target=. --mount=target=/root/.cache,type=cache \
+	set -eux && \
+	CGO_ENABLED=0 xx-go build \
+		-a -v \
+		-tags='osusergo,netgo' \
+		-installsuffix='netgo' \
+		-ldflags="-s -w -X cuelang.org/go/cmd/cue/cmd.version=${CUE_VERSION} \"-extldflags=-static\"" \
+	-o ${OUTDIR}/usr/bin/cue ./cmd/cue && \
+	xx-verify --static ${OUTDIR}/usr/bin/cue
+
+# target: cue binary
+FROM scratch AS cue-releaser
+COPY --from=cue-builder /out/usr/bin/cue /
+
+# target: cue
+FROM gcr.io/distroless/static:latest AS cue
+COPY --from=cue-builder /out/ /
+ENTRYPOINT ["/usr/bin/cue"]
